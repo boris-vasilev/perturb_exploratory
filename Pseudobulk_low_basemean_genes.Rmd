@@ -1,0 +1,229 @@
+```{r}
+library(tidyverse)
+library(data.table)
+library(here)
+library(patchwork)
+library(ggrepel)
+library(broom)
+
+theme_set(theme_bw())
+```
+
+```{r}
+Jurkat.bulk <- fread(here("data/perturb/pairs/Jurkat/bulk_pertubration_pairs.csv"))
+K562.bulk <- fread(here("data/perturb/pairs/K562/bulk_pertubration_pairs.csv"))
+Jurkat.bulk.ash <- fread(here("data/perturb/pairs/Jurkat/ash_bulk_pertubration_pairs.csv"))
+
+Jurkat.bulk <- Jurkat.bulk %>% filter(effect != "")
+K562.bulk <- K562.bulk %>% filter(effect != "")
+Jurkat.bulk.ash <- Jurkat.bulk.ash %>% filter(effect != "")
+```
+
+```{r}
+
+ymin <- min(
+  Jurkat.bulk$avg_log2FC,
+  Jurkat.bulk.ash$avg_log2FC,
+  Jurkat.bulk$avg_log2FC,
+  na.rm = TRUE
+)
+
+ymax <- max(
+  Jurkat.bulk$avg_log2FC,
+  Jurkat.bulk.ash$avg_log2FC,
+  Jurkat.bulk$avg_log2FC,
+  na.rm = TRUE
+)
+
+ylim <- c(ymin, ymax)
+
+Jurkat.bulk.plot <- ggplot(Jurkat.bulk %>% filter(padj < 0.05), 
+       aes(x = baseMean, y = avg_log2FC, color=-log10(padj))) +
+  geom_point(alpha = 0.5, size = 0.8) +
+  scale_x_log10() +
+  #scale_y_log10() +
+  coord_cartesian(ylim = ylim) +
+  geom_vline(xintercept = 10, linetype = "dashed", color = "red") +  # threshold for low baseMean
+  labs(
+    x = "Baseline expression counts",
+    y = "logFC",
+    title = "DESeq2 (LRT) - Jurkat"
+  ) +
+  theme_minimal()
+
+K562.bulk.plot <- ggplot(K562.bulk %>% filter(padj< 0.05), 
+       aes(x = baseMean, y = avg_log2FC, color=-log10(padj))) +
+  geom_point(alpha = 0.5, size = 0.8) +
+  scale_x_log10() +
+  #scale_y_log10() +
+  coord_cartesian(ylim = ylim) +
+  geom_vline(xintercept = 10, linetype = "dashed", color = "red") +  # threshold for low baseMean
+  labs(
+    x = "Baseline expression counts",
+    y = "logFC",
+    title = "DESeq2 (LRT) - K562"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+Jurkat.bulk.plot + K562.bulk.plot
+```
+
+```{r}
+get_efficient_perturbations <- function(dat) {
+  return(
+    dat %>%
+      filter(perturbation == effect) %>%
+      mutate(KD_eff = 2^avg_log2FC) %>%
+      filter(KD_eff < 0.3) %>%
+      pull(perturbation)
+  )
+}
+
+# Select only efficient perturbations
+Jurkat.bulk.efficient_perturbations <- Jurkat.bulk %>% get_efficient_perturbations
+K562.bulk.efficient_perturbations <- K562.bulk %>% get_efficient_perturbations
+
+Jurkat.bulk <- Jurkat.bulk %>% filter(perturbation %in% Jurkat.bulk.efficient_perturbations)
+K562.bulk <- K562.bulk %>% filter(perturbation %in% K562.bulk.efficient_perturbations)
+```
+
+
+```{r}
+Jurkat.low_base_high_LFC <- Jurkat.bulk %>% filter(avg_log2FC < -10)
+K562.low_base_high_LFC <- K562.bulk %>% filter(avg_log2FC < -10)
+```
+
+```{r}
+Jurkat.low_base_high_LFC$effect %>% unique %>% dput
+```
+
+# Ashr correction
+
+
+```{r}
+ash_significant <- Jurkat.bulk.ash %>% filter(svalue < 0.05)
+```
+
+```{r}
+# Create a key to join on
+setkey(Jurkat.bulk, perturbation, effect)
+setkey(Jurkat.bulk.ash, perturbation, effect)
+
+# Add in_ash column: TRUE if pair in Jurkat.bulk.ash, else FALSE
+Jurkat.bulk[, in_ash := .( (perturbation %in% ash_significant$perturbation) & (effect %in% ash_significant$effect) )]
+
+# The above might incorrectly mark some rows TRUE when perturbation and effect appear separately but not as a pair.
+# Better to do a join to check pairs exactly:
+
+Jurkat.bulk[, in_ash := FALSE]  # initialize
+
+# Find rows in Jurkat.bulk that also appear in Jurkat.bulk.ash by both keys
+Jurkat.bulk[ash_significant, on = .(perturbation, effect), in_ash := TRUE]
+```
+
+```{r}
+# Calculate percentage excluded (not in_ash)
+pct_excluded <- Jurkat.bulk %>%
+  summarise(pct_excluded = mean(!in_ash) * 100) %>%
+  pull(pct_excluded) %>%
+  round(1)
+
+label_text <- paste0(pct_excluded, "% excluded after shrinkage")
+
+Jurkat.bulk <- Jurkat.bulk %>%
+  mutate(in_ash_label = ifelse(in_ash, "Kept after shrinkage", "Excluded after shrinkage"))
+
+Jurkat.bulk.plot <- ggplot(Jurkat.bulk %>% filter(padj < 0.05), 
+       aes(x = baseMean, y = avg_log2FC, color=-log10(padj))) +
+  geom_point(alpha = 0.5, size = 0.8) +
+  scale_x_log10() +
+  #scale_y_log10() +
+  geom_vline(xintercept = 10, linetype = "dashed", color = "red") +  # threshold for low baseMean
+  labs(
+    x = "Baseline expression counts",
+    y = "logFC",
+    title = "DESeq2 (LRT) - Jurkat"
+  ) +
+  theme_minimal()
+
+shrinkage_plot <- ggplot(Jurkat.bulk, aes(x = baseMean, y = avg_log2FC)) +
+  geom_point(
+    aes(color = in_ash_label, alpha = in_ash_label),
+    size = 0.9
+  ) +
+  scale_x_log10() +
+  scale_alpha_manual(
+    values = c(
+      "Excluded after shrinkage" = 0.9,
+      "Kept after shrinkage"     = 0.2
+    ),
+    guide = "none"  # don't show alpha legend
+  ) +
+  scale_color_manual(
+    values = c(
+      "Excluded after shrinkage" = "tomato",
+      "Kept after shrinkage"     = "darkturquoise"
+    )
+  ) +
+  geom_vline(xintercept = 10, linetype = "dashed", color = "red") +
+  labs(
+    x = "Baseline expression counts",
+    y = "logFC",
+    title = "Effect size shrinkage significance - Jurkat",
+    color = "Shrinkage status"
+  ) +
+  coord_cartesian(ylim = c(ymin, ymax)) +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  annotate("text", x = max(Jurkat.bulk$baseMean, na.rm = TRUE),
+           y = max(Jurkat.bulk$avg_log2FC, na.rm = TRUE),
+           label = label_text,
+           hjust = 1, vjust = 1, color = "black", size = 5)
+
+
+```
+
+```{r}
+Jurkat.perturb.all <- fread(here("data/perturb/pairs/Jurkat/bulk_pertubration_pairs_all.csv"))
+```
+
+```{r}
+all_df <- Jurkat.perturb.all %>% select(perturbation, effect, baseMean)
+```
+
+```{r}
+ash_df <- ash_significant %>% merge(all_df, by = c("perturbation", "effect"))
+```
+
+```{r}
+Jurkat.ash.plot <- ggplot(ash_df, 
+       aes(x = baseMean, y = avg_log2FC, color=-log10(svalue))) +
+  geom_point(alpha = 0.5, size = 0.8) +
+  scale_x_log10() +
+  #scale_y_log10() +
+  coord_cartesian(ylim = ylim) +
+  geom_vline(xintercept = 10, linetype = "dashed", color = "red") +  # threshold for low baseMean
+  labs(
+    x = "Baseline expression counts",
+    y = "logFC",
+    title = "Ash adjusted DESeq2 (LRT) - Jurkat"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+p <- (Jurkat.bulk.plot + Jurkat.ash.plot) / shrinkage_plot + plot_annotation(tag_levels = 'A')
+
+shrinkage_plot <- shrinkage_plot + theme(legend.position = "bottom")
+
+blank <- plot_spacer()
+
+p <- (Jurkat.bulk.plot + Jurkat.ash.plot) / (blank + shrinkage_plot + blank) +
+     plot_layout(heights = c(1, 1), widths = c(0.1, 1, 0.1)) +
+     plot_annotation(tag_levels = 'A')
+ggsave(here("plots/exploratory/ashr_pseudobulk_shrinkage_2.png"), plot = p, height = 8, width = 15)
+
+```
+

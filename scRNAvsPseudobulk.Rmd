@@ -1,0 +1,286 @@
+```{r}
+library(tidyverse)
+library(data.table)
+library(here)
+library(ggrepel)
+library(broom)
+library(patchwork)
+
+theme_set(theme_bw())
+```
+
+```{r}
+Jurkat.bulk <- fread(here("data/perturb/pairs/bulk_Jurkat/bulk_perturbation_pairs_eff.csv"))
+K562.bulk <- fread(here("data/perturb/pairs/bulk_K562_essential/bulk_perturbation_pairs_eff.csv"))
+
+Jurkat.sc <- fread(here("data/perturb/pairs/Jurkat/perturbation_pairs_eff.csv"))
+K562.sc <- fread(here("data/perturb/pairs/K562_essential/perturbation_pairs_eff.csv"))
+
+# Filter genes that have no assigned effect gene name for some reason
+Jurkat.sc <- Jurkat.sc %>% filter(effect != "")
+K562.sc <- K562.sc %>% filter(effect != "")
+Jurkat.bulk <- Jurkat.bulk %>% filter(effect != "")
+K562.bulk <- K562.bulk %>% filter(effect != "")
+
+Jurkat.sc.baseMean <- fread(here("data/perturb/QC/Jurkat/baseline_expression.csv"))
+K562.sc.baseMean <- fread(here("data/perturb/QC/K562_essential/baseline_expression.csv"))
+```
+
+Seurat Wilcoxon test doesn't provide baseMean, so we use the ones from DESeq2
+```{r}
+Jurkat.sc <- Jurkat.sc %>%
+  distinct(perturbation, effect, .keep_all = TRUE) %>%
+  inner_join(Jurkat.sc.baseMean %>% select(perturbation, effect, baseMean)
+             %>% distinct(perturbation, effect, .keep_all = TRUE),
+             by=c("perturbation","effect"))
+
+K562.sc <- K562.sc %>%
+  distinct(perturbation, effect, .keep_all = TRUE) %>%
+  inner_join(K562.sc.baseMean %>% select(perturbation, effect, baseMean)
+             %>% distinct(perturbation, effect, .keep_all = TRUE),
+             by=c("perturbation","effect"))
+```
+
+
+# Single cell
+```{r}
+pseudocount <- 1e-300
+shared_pval_color_limits <- c(-log10(0.05), max(
+  -log10(Jurkat.sc$p_val_adj + pseudocount),
+  -log10(K562.sc$p_val_adj + pseudocount),
+  -log10(Jurkat.bulk$p_val_adj + pseudocount),
+  -log10(K562.bulk$p_val_adj + pseudocount),
+  na.rm = TRUE
+))
+
+
+Jurkat.sc.plot <- ggplot(Jurkat.sc %>% filter(p_val_adj< 0.05), 
+       aes(x = baseMean, y = avg_log2FC, color=-log10(p_val_adj))) +
+  geom_point(alpha = 0.5, size = 0.8) +
+  scale_x_log10() +
+  scale_color_gradient(limits = shared_pval_color_limits) +
+  #scale_y_log10() +
+  # geom_vline(xintercept = 10, linetype = "dashed", color = "red") +  # threshold for low baseMean
+  labs(
+    x = "Avg single-cell expression",
+    y = "logFC",
+    title = "Seurat (wilcox) - Jurkat",
+    color = "-log10(FDR)"
+  ) +
+  theme_minimal()
+
+# Define cap
+y_cap <- 100
+
+# Create new column to identify capped points
+K562.sc <- K562.sc %>%
+  mutate(
+    is_capped = avg_log2FC > y_cap,
+    logFC_capped = ifelse(avg_log2FC > y_cap, y_cap, avg_log2FC)
+  )
+
+# Plot
+K562.sc.plot <- ggplot(K562.sc %>% filter(p_val_adj < 0.05), 
+       aes(x = baseMean, y = logFC_capped, color = -log10(p_val_adj))) +
+  geom_point(data = ~ filter(.x, !is_capped), alpha = 0.5, size = 0.8) +  # regular points
+  geom_text(data = ~ filter(.x, is_capped), label = "▲", size = 3, color = "red") +  # arrow points
+  scale_x_log10() +
+  scale_y_continuous(limits = c(min(K562.sc$avg_log2FC), y_cap)) +
+  scale_color_gradient(limits = shared_pval_color_limits) +
+  labs(
+    x = "Avg single-cell expression",
+    y = "logFC",
+    title = "Seurat (wilcox) - K562",
+    color = "-log10(FDR)"
+  ) +
+  theme_minimal()
+
+```
+
+# Pseudobulk
+```{r}
+Jurkat.bulk.plot <- ggplot(Jurkat.bulk %>% filter(p_val_adj < 0.05), 
+       aes(x = baseMean, y = avg_log2FC, color=-log10(p_val_adj))) +
+  geom_point(alpha = 0.5, size = 0.8) +
+  scale_x_log10() +
+  scale_color_gradient(limits = shared_pval_color_limits) +
+  #scale_y_log10() +
+  # geom_vline(xintercept = 10, linetype = "dashed", color = "red") +  # threshold for low baseMean
+  labs(
+    x = "Avg pseudobulk expression (normalized)",
+    y = "logFC",
+    title = "DESeq2 (LRT) - Jurkat",
+    color = "-log10(FDR)"
+  ) +
+  theme_minimal()
+
+K562.bulk.plot <- ggplot(K562.bulk %>% filter(p_val_adj< 0.05), 
+       aes(x = baseMean, y = avg_log2FC, color=-log10(p_val_adj))) +
+  geom_point(alpha = 0.5, size = 0.8) +
+  scale_x_log10() +
+  scale_color_gradient(limits = shared_pval_color_limits) +
+  #scale_y_log10() +
+  # geom_vline(xintercept = 10, linetype = "dashed", color = "red") +  # threshold for low baseMean
+  labs(
+    x = "Avg pseudobulk expression (normalized)",
+    y = "logFC",
+    title = "DESeq2 (LRT) - K562",
+    color = "-log10(FDR)"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+p <- wrap_elements(Jurkat.sc.plot + K562.sc.plot) /
+  wrap_elements(Jurkat.bulk.plot + K562.bulk.plot) +
+  plot_annotation(tag_levels = 'A', title = "Distribution of log-fold changes from differential expression tests (after pairwise QC)") +
+  plot_layout(guides = "collect")
+ggsave(here("plots/exploratory/sc_vs_pseudobulk.png"), plot = p, height = 8, width = 10)
+```
+
+```{r}
+ggplot(K562.sc %>% filter(p_val_adj < 0.05, avg_log2FC < 10), 
+       aes(x = baseMean, y = avg_log2FC, color=-log10(p_val_adj))) +
+  geom_point(alpha = 0.5, size = 0.8) +
+  scale_x_log10() +
+  #scale_y_log10() +
+  geom_vline(xintercept = 10, linetype = "dashed", color = "red") +  # threshold for low baseMean
+  labs(
+    x = "Baseline expression counts",
+    y = "logFC",
+    title = "Seurat (wilcox) - K562"
+  ) +
+  theme_minimal()
+```
+
+# Differences in the set of DEGs
+
+```{r}
+Jurkat.bulk.ash <- fread(here("data/perturb/pairs/Jurkat/ash_bulk_pertubration_pairs_eff.csv"))
+
+Jurkat.bulk.ash$svalue %>% summary
+
+get_efficient_perturbations <- function(dat) {
+  return(
+    dat %>%
+      filter(perturbation == effect) %>%
+      mutate(KD_eff = 2^avg_log2FC) %>%
+      filter(KD_eff < 0.3) %>%
+      pull(perturbation)
+  )
+}
+
+# Select only efficient perturbations
+Jurkat.sc.efficient_perturbations <- Jurkat.sc %>% get_efficient_perturbations
+Jurkat.sc <- Jurkat.sc %>% filter(perturbation %in% Jurkat.sc.efficient_perturbations)
+
+Jurkat.sc %>% select(perturbation, effect)
+```
+
+```{r}
+# ---- Jurkat Jaccard indices ----
+Jurkat.sc_DEGs <- Jurkat.sc %>%
+  group_by(perturbation) %>%
+  summarise(DEGs.sc = list(unique(effect)))
+
+Jurkat.bulk_DEGs <- Jurkat.bulk %>%
+  group_by(perturbation) %>%
+  summarise(DEGs.bulk = list(unique(effect)))
+
+combined_J <- inner_join(Jurkat.sc_DEGs, Jurkat.bulk_DEGs, by = "perturbation")
+
+jaccard_J <- combined_J %>%
+  rowwise() %>%
+  mutate(jaccard_index = length(intersect(DEGs.sc, DEGs.bulk)) /
+                          length(union(DEGs.sc, DEGs.bulk))) %>%
+  ungroup() %>%
+  mutate(cell_line = "Jurkat")
+
+# ---- K562 Jaccard indices ----
+K562.sc_DEGs <- K562.sc %>%
+  group_by(perturbation) %>%
+  summarise(DEGs.sc = list(unique(effect)))
+
+K562.bulk_DEGs <- K562.bulk %>%
+  group_by(perturbation) %>%
+  summarise(DEGs.bulk = list(unique(effect)))
+
+combined_K <- inner_join(K562.sc_DEGs, K562.bulk_DEGs, by = "perturbation")
+
+jaccard_K <- combined_K %>%
+  rowwise() %>%
+  mutate(jaccard_index = length(intersect(DEGs.sc, DEGs.bulk)) /
+                          length(union(DEGs.sc, DEGs.bulk))) %>%
+  ungroup() %>%
+  mutate(cell_line = "K562")
+
+# ---- Combine and plot ----
+jaccard_all <- bind_rows(jaccard_J, jaccard_K)
+
+p <- ggplot(jaccard_all, aes(x = jaccard_index, fill = cell_line, color = cell_line)) +
+  geom_density(alpha = 0.4) +
+  labs(
+    title = "Jaccard index distribution between Seurat-Wilcox and DESeq2 LRT",
+    x = "Jaccard index",
+    y = "Density",
+    fill = "Cell line",
+    color = "Cell line"
+  ) +
+  theme_minimal()
+
+p
+
+```
+
+
+
+
+# Distribution of adjusted p-values between Jurkat Seurat and DESeq2
+
+```{r}
+Jurkat.sc.all <- fread(here("data/perturb/pairs/Jurkat/pertubration_pairs_all.csv"))
+Jurkat.sc.all <- Jurkat.sc.all %>% filter(effect != "")
+
+```
+```{r}
+
+ggplot(Jurkat.sc.all$p_val_adj
+
+sc_pvals <- ggplot(Jurkat.sc.all, aes(x=p_val_adj)) +
+  geom_density() +
+  ggtitle("Seurat - Jurkat - distribution of adjusted p-values") +
+  xlab("Adjusted p-values")
+
+p <- K_eff + J_eff + plot_annotation(tag_levels = 'A')
+
+ggsave(here("plots/exploratory/perturbation_efficiency.png"), plot = p, height = 4, width = 8)
+
+merged_df <- inner_join(
+  Jurkat.sc.all %>% select(perturbation, effect, p_val_adj) %>% rename(seurat_padj = p_val_adj),
+  Jurkat.bulk.all %>% select(perturbation, effect, padj) %>% rename(deseq_padj = padj),
+  by = c("perturbation", "effect")
+)
+merged_df_long <- merged_df %>%
+  pivot_longer(cols = c(seurat_padj, deseq_padj), names_to = "method", values_to = "padj")
+
+ggplot(merged_df_long, aes(x = padj, fill = method)) +
+  geom_histogram(position = "identity", alpha = 0.5, bins = 50) +
+  scale_fill_manual(values = c("seurat_padj" = "skyblue", "deseq_padj" = "orange")) +
+  theme_minimal() +
+  scale_x_log10() +
+  scale_y_log10() +
+  labs(title = "Adjusted p-value distributions", x = "Adjusted p-value", y = "Count")
+
+
+library(qqplotr)
+
+ggplot(merged_df_long, aes(sample = padj, color = method)) +
+  stat_qq_band(distribution = "unif", alpha = 0.2) +
+  stat_qq_line(distribution = "unif") +
+  stat_qq_point(distribution = "unif") +
+  theme_minimal() +
+  labs(title = "QQ Plot of Adjusted P-values", x = "Expected", y = "Observed")
+
+
+```
+

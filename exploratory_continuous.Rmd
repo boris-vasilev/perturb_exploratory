@@ -1,0 +1,167 @@
+```{r}
+library(tidyverse)
+library(data.table)
+library(here)
+library(ggrepel)
+library(patchwork)
+
+theme_set(theme_bw())
+```
+
+```{r}
+K562.bulk <- fread(here("data/perturb/pairs/K562/bulk_gaussian_trans_dat.csv"))
+K562.perturb <- fread(here("data/perturb/pairs/K562/bulk_pertubration_pairs.csv"))
+K562.qtl <- fread(here("data/perturb/pairs/K562/bulk_eQTL_pairs.csv"))
+```
+
+```{r}
+Jurkat.bulk <- fread(here("data/perturb/pairs/Jurkat/bulk_gaussian_trans_dat.csv"))
+Jurkat.perturb <- fread(here("data/perturb/pairs/Jurkat/bulk_pertubration_pairs.csv"))
+Jurkat.qtl <- fread(here("data/perturb/pairs/Jurkat/bulk_eQTL_pairs.csv"))
+```
+
+Perturbation efficiencies
+```{r}
+Jurkat.perturb %>% filter(perturbation == effect) %>% pull(avg_log2FC) %>% summary
+K562.perturb %>% filter(perturbation == effect) %>% pull(avg_log2FC) %>% summary
+```
+
+```{r}
+K562.efficiency <- K562.perturb %>% filter(perturbation == effect) %>% mutate(KD_eff = 2^avg_log2FC)
+Jurkat.efficiency <- Jurkat.perturb %>% filter(perturbation == effect) %>% mutate(KD_eff = 2^avg_log2FC)
+
+K_eff <- ggplot(K562.efficiency, aes(x=KD_eff)) +
+  geom_density() +
+  ggtitle("K562 Knockdown efficiency") +
+  xlab("KD efficiency (expression % from baseline)") +
+  geom_vline(xintercept = 0.3, linetype = "dashed", color = "red")  # efficiency 70%
+J_eff <- ggplot(Jurkat.efficiency, aes(x=KD_eff)) +
+  geom_density() +
+  ggtitle("Jurkat Knockdown efficiency") +
+  xlab("KD efficiency (expression % from baseline)") +
+  geom_vline(xintercept = 0.3, linetype = "dashed", color = "red")  # efficiency 70%
+
+p <- K_eff + J_eff + plot_annotation(tag_levels = 'A')
+
+ggsave(here("plots/exploratory/perturbation_efficiency.png"), plot = p, height = 4, width = 8)
+```
+
+```{r}
+K562.efficiency$KD_eff %>% summary
+```
+
+```{r}
+Jurkat.efficiency$KD_eff %>% summary
+```
+
+Jurkat has better efficiencies so we'll focus on it first. No need to filter.
+
+Select only SNPs with strong negative cis effect
+Select the 20 SNPs with the most negative cis effect
+
+```{r}
+top20 <- Jurkat.qtl %>%
+  group_by(SNP) %>%
+  slice_min(Beta.perturb, with_ties = FALSE) %>%  # keep most negative per SNP
+  ungroup() %>%
+  slice_min(Beta.perturb, n = 20) %>%
+  pull(SNP)
+
+strong.qtl <- Jurkat.qtl %>% filter(SNP %in% top20)
+```
+
+
+Those are QTL pairs with strong cis-eQTL which is strongly negative and would have similar effect to perturbation
+```{r}
+strong <- merge(strong.qtl %>% select(Beta.perturb, Beta.effect, perturbation, effect), Jurkat.perturb, by=c("perturbation", "effect"))
+```
+
+```{r}
+# select only the row with the minimum Beta.perturb per perturbation–effect pair
+strong <- strong %>%
+  group_by(perturbation, effect) %>%
+  slice_min(Beta.perturb, with_ties = FALSE) %>%
+  ungroup()
+
+# 1. Define quadrants
+strong <- strong %>%
+  mutate(quadrant = case_when(
+    Beta.effect > 0 & avg_log2FC > 0 ~ "Q1",
+    Beta.effect < 0 & avg_log2FC > 0 ~ "Q2",
+    Beta.effect < 0 & avg_log2FC < 0 ~ "Q3",
+    Beta.effect > 0 & avg_log2FC < 0 ~ "Q4",
+    TRUE ~ "Other"
+  ))
+
+# 2. Calculate percentages
+quad_counts <- strong %>%
+  filter(quadrant != "Other") %>%
+  count(quadrant) %>%
+  mutate(percentage = round(100 * n / sum(n), 1))
+
+# 3. Set quadrant label positions
+quad_labels <- tibble(
+  quadrant = c("Q1", "Q2", "Q3", "Q4"),
+  x = c(0.3, -0.3, -0.3, 0.3),    # approximate x positions
+  y = c(1, 1, -1, -1)     # approximate y positions
+) %>%
+  left_join(quad_counts, by = "quadrant") %>%
+  mutate(label = paste0(percentage, "%"))
+
+
+
+# 4. Plot with annotations
+ggplot(strong, aes(x = Beta.effect, y = avg_log2FC)) +
+  geom_point(size = 0.1) +
+  geom_hline(yintercept = 0, color = "red") +
+  geom_vline(xintercept = 0, color = "red") +
+  ylab("log2FC") +
+  xlab("trans-eQTL effect size") + 
+  ggtitle("Relationship between trans-eQTL effect size and perturb-seq") +
+  geom_text(data = quad_labels, aes(x = x, y = y, label = label), 
+            color = "blue", size = 4, fontface = "bold") +
+  theme_bw()
+
+
+
+strong.filter_extreme <- strong %>% filter(avg_log2FC > -15)
+ggplot(strong.filter_extreme, aes(x=Beta.effect, y=avg_log2FC)) +
+  geom_point(size=0.1) +
+  geom_hline(yintercept = 0,color ="red") +
+  geom_vline(xintercept = 0,color ="red") +
+  ylab("log2FC") +
+  xlab("trans-eQTL effect size") + 
+  ggtitle("Filter the -15 to see the rest") +
+  geom_text(data = quad_labels, aes(x = x, y = y, label = label), 
+            color = "blue", size = 4, fontface = "bold") +
+  theme_bw()
+
+
+```
+Signed regulator-trans-eQTL correlation vs trans-eQTL effect size (like figure 3C in Pritchard's paper)
+
+```{r}
+strong <- strong %>% mutate(strong)
+```
+
+
+
+```{r}
+top20 <- Jurkat.qtl %>%
+  group_by(SNP) %>%
+  slice_min(Beta.perturb, with_ties = FALSE) %>%  # keep most negative per SNP
+  ungroup() %>%
+  slice_min(Beta.perturb, n = 20) %>%
+  pull(SNP)
+strong.qtl <- Jurkat.qtl %>% filter(SNP %in% top20)
+
+strong <- merge(strong.qtl %>% select(Beta.perturb, Beta.effect, perturbation, effect), Jurkat.perturb, by=c("perturbation", "effect"))
+```
+
+```{r}
+
+Jurkat.qtl %>% group_by(perturbation) %>% summarise(uniSNP = length(unique(SNP))) %>% arrange(uniSNP)
+strong$perturbation %>% table
+strong %>% group_by(perturbation) %>% summarise(avglfc = mean(avg_log2FC)) %>% arrange(avglfc)
+```
+

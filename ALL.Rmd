@@ -1,0 +1,221 @@
+```{r}
+library(tidyverse)
+library(data.table)
+library(here)
+library(ggrepel)
+library(broom)
+
+theme_set(theme_bw())
+```
+
+```{r}
+
+
+# Selecting TMEM258
+merge(Jurkat.perturb %>% filter(perturbation == effect, avg_log2FC < -3), Jurkat.qtl, by=c("perturbation")) %>% group_by(perturbation) %>% summarise(nums=length(unique(SNP)), base = mean(baseMean), maxeffect = max(Beta.perturb),) %>% arrange(desc(maxeffect))
+```
+
+
+```{r}
+Jurkat.perturb.all <- fread(here("data/perturb/pairs/Jurkat/bulk_pertubration_pairs_all.csv"))
+Jurkat.qtl.all <- fread(here("data/perturb/pairs/Jurkat/bulk_eQTL_pairs_all.csv"))
+```
+
+
+```{r}
+gene.perturb <- Jurkat.perturb.all %>% filter(perturbation == "BUD13")
+gene.qtl <- Jurkat.qtl.all %>% filter(perturbation == "BUD13")
+```
+
+
+```{r}
+gene.dat <- merge(gene.perturb, gene.qtl, by=c("perturbation", "effect"))
+```
+
+```{r}
+gene.dat$Beta.perturb %>% unique %>% summary
+```
+
+```{r}
+gene.dat$Beta.effect %>% unique %>% summary
+Jurkat.qtl$Beta.effect %>% unique %>% summary
+```
+
+Sign concordance
+```{r}
+DEGs <- gene.dat %>% filter(padj < 0.05)
+non_DEGs <- gene.dat %>% filter(padj > 0.05)
+```
+
+```{r}
+signs.DEGs <- DEGs %>% mutate(signLFC=sign(avg_log2FC), signQTL = sign(Beta.perturb) * sign(Beta.effect))
+table(signs.DEGs$signLFC, signs.DEGs$signQTL)
+```
+
+
+
+```{r}
+signs.non_DEGs <- non_DEGs %>% mutate(signLFC=sign(avg_log2FC), signQTL = sign(Beta.perturb) * sign(Beta.effect))
+table(signs.non_DEGs$signLFC, signs.non_DEGs$signQTL)
+```
+
+```{r}
+
+# Correlation analysis
+cor_DEGs <- cor(DEGs$Beta.perturb, DEGs$Beta.effect)
+cor_non_DEGs <- cor(non_DEGs$Beta.perturb, non_DEGs$Beta.effect)
+
+# Linear regression for DEGs (predicting beta_trans using logFC and beta_cis)
+lm_DEGs <- lm(Beta.effect ~ avg_log2FC * Beta.perturb, data = DEGs)
+summary(lm_DEGs)
+
+# Linear regression for non-DEGs (predicting beta_trans using logFC and beta_cis)
+lm_non_DEGs <- lm(Beta.effect ~ avg_log2FC * Beta.perturb, data = non_DEGs)
+
+summary(lm_non_DEGs)
+```
+
+```{r}
+trans_regressed_on_cis <- gene.qtl %>%
+  group_by(effect) %>%
+  do(tidy(lm(Beta.effect ~ Beta.perturb, data = .))) %>%
+  ungroup()
+```
+
+```{r}
+ggplot(merge(trans_regressed_on_cis %>% filter(term == "Beta.perturb"), gene.perturb, by="effect"), aes(x=avg_log2FC, y=sign(estimate)*log(p.value), color=padj < 0.05)) + geom_point(size=0.5) + geom_text_repel(aes(label=effect), size = 2)
+```
+
+
+
+```{r}
+gene.perturb %>% filter(avg_log2FC < -15) %>% pull(baseMean) %>% summary
+```
+```{r}
+cor_cis_trans <- gene.dat %>%
+  group_by(perturbation, effect) %>%
+  summarise(
+    cor_cis_trans = cor(Beta.perturb, Beta.effect, use = "complete.obs"),
+    num_snps = length(SNP),
+    .groups = "drop"
+  )
+```
+
+```{r}
+ggplot(merge(cor_cis_trans, gene.perturb, by="effect") %>% drop_na(), aes(x=avg_log2FC, y=cor_cis_trans, color=padj < 0.05)) +
+  geom_point(size=0.5) +
+  geom_text_repel(aes(label=effect), size = 2) +
+  geom_hline(yintercept = 0, color="red") +
+  geom_vline(xintercept = 0, color="red") +
+  ylab("Cor(b_cis, b_trans)") +
+  xlab("Average logFC")
+```
+
+```{r}
+
+ggplot(gene.perturb %>% filter(avg_log2FC < -15), aes(x=baseMean)) +
+  geom_density() +
+  ggtitle("Perturbation BUD13 - Baseline expression of the DEGs with LFC < -15")
+```
+```{r}
+Jurkat.perturb.ash <- fread(here("data/perturb/pairs/Jurkat/ash_bulk_pertubration_pairs_all.csv"))
+Jurkat.qtl.ash <- fread(here("data/perturb/pairs/Jurkat/ash_bulk_eQTL_pairs.csv"))
+Jurkat.perturb.ash$perturbation %>% unique %>% sort
+gene.perturb.ash <- Jurkat.perturb.ash %>% filter(perturbation == "BUD13")
+gene.qtl.ash <- Jurkat.qtl.ash %>% filter(perturbation == "BUD13")
+
+gene.dat.ash <- merge(gene.perturb.ash, gene.qtl.ash, by=c("perturbation", "effect"))
+```
+
+```{r}
+ggplot(merge(cor_cis_trans, gene.perturb.ash, by="effect") %>% drop_na(), aes(x=avg_log2FC, y=cor_cis_trans, color=svalue < 0.05)) +
+  geom_point(size=0.5) +
+  geom_text_repel(aes(label=effect), size = 2) +
+  geom_hline(yintercept = 0, color="red") +
+  geom_vline(xintercept = 0, color="red") +
+  ylab("Cor(b_cis, b_trans)") +
+  xlab("Average logFC")
+```
+```{r}
+BUD13.ashr <- read_csv(here("BUD13_ashr.csv"))
+```
+```{r}
+
+BUD13.ashr.cor <- merge(cor_cis_trans, gene.perturb.ash, by="effect") %>% drop_na()
+
+gene.perturb$LFC_inflated <- gene.perturb$avg_log2FC < -15
+BUD13.ashr.cor <- merge(BUD13.ashr.cor, gene.perturb %>% select(effect, LFC_inflated), by="effect")
+
+ggplot(BUD13.ashr.cor, aes(x=avg_log2FC, y=cor_cis_trans, color=svalue < 0.05)) +
+  geom_point(size=0.5) +
+  geom_text_repel(aes(label = ifelse(LFC_inflated, effect, "")), max.overlaps = Inf, color="black", size=1) +
+  geom_text_repel(aes(label = effect), size=1) +
+  geom_hline(yintercept = 0, color="red") +
+  geom_vline(xintercept = 0, color="red") +
+  ylab("Cor(b_cis, b_trans)") +
+  xlab("Average logFC")
+```
+
+```{r}
+
+ggplot(Jurkat.perturb.all %>% filter(padj < 0.05), 
+       aes(x = baseMean, y = avg_log2FC, color=-log10(padj))) +
+  geom_point(alpha = 0.5, size = 0.8) +
+  scale_x_log10() +
+  #scale_y_log10() +
+  geom_vline(xintercept = 10, linetype = "dashed", color = "red") +  # threshold for low baseMean
+  labs(
+    x = "baseMean (log10 scale)",
+    y = "avg_log2FC",
+    title = "High logFC among significant hits often comes from low baseMean (padj < 0.05)"
+  ) +
+  theme_minimal()
+
+
+ggplot(Jurkat.perturb.all %>% filter(padj < 0.05), aes(x = baseMean, y=avg_log2FC))+ scale_x_log10() + geom_density_2d_filled(bins = 30)
+```
+
+```{r}
+ash_df <- Jurkat.perturb.ash %>% rename(ashLFC="avg_log2FC") %>% distinct(perturbation, effect, .keep_all = TRUE) %>% select(perturbation, effect, ashLFC, svalue)
+all_df <- Jurkat.perturb.all %>% rename(LFC="avg_log2FC") %>% distinct(perturbation, effect, .keep_all = TRUE) %>% select(perturbation, effect, LFC, baseMean, padj)
+rm(Jurkat.perturb.ash, Jurkat.perturb.all)
+ash_shrinkage_df <- merge(ash_df, all_df, by=c("perturbation", "effect"))
+
+ash_shrinkage_df <- ash_shrinkage_df %>% mutate(excluded = ash_shrinkage_df$padj < 0.05 & ash_shrinkage_df$svalue > 0.05)
+
+
+ggplot(ash_shrinkage_df %>% filter(svalue < 0.05),
+       aes(x = baseMean, y = ashLFC, color=-log10(svalue))) +
+  geom_point(alpha = 0.5, size = 0.8) +
+  scale_x_log10() +
+  #scale_y_log10() +
+  geom_vline(xintercept = 10, linetype = "dashed", color = "red") +  # threshold for low baseMean
+  labs(
+    x = "baseMean (log10 scale)",
+    y = "avg_log2FC",
+    title = "High logFC among significant hits often comes from low baseMean (svalue < 0.05)"
+  ) +
+  theme_minimal()
+
+ggplot(ash_shrinkage_df,
+       aes(x = baseMean, y = LFC, color=excluded)) +
+  geom_point(alpha = 0.1, size = 0.3) +
+  scale_x_log10() +
+  #scale_y_log10() +
+  geom_vline(xintercept = 10, linetype = "dashed", color = "red") +  # threshold for low baseMean
+  scale_color_manual(
+    values = c("TRUE" = "red", "FALSE" = "black")
+  ) +
+  labs(
+    x = "baseMean (log10 scale)",
+    y = "avg_log2FC",
+    title = "High logFC among significant hits often comes from low baseMean (svalue < 0.05)"
+  ) +
+  theme_minimal()
+```
+```{r}
+ash_shrinkage_df %>% filter(padj < 0.05) %>% pull(excluded) %>% table %>% prop.table
+
+ash_shrinkage_df
+```
+

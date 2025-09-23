@@ -1,0 +1,64 @@
+```{r}
+library(ggplot2)
+library(here)
+library(glue)
+```
+
+```{r}
+summary <- readRDS(here("data/perturb/pairs/bulk_Jurkat/filter_summary.RDS"))
+
+# Define box positions and labels
+df_boxes <- data.frame(
+  label = c(
+    # Perturbations
+    glue("Perturb-seq\n
+    # Perturbations = {summary$total_perturbs}\n
+    # Perturb-DEG pairs = {summary$total_pairs}"
+    ),
+    
+    glue("Efficient perturbations (>70% expression decrease)\n
+    # Perturbations = {summary$efficient_perturbs}\n
+    # Perturb-DEG pairs = {summary$efficient_pairs}"),
+    glue("Significant DEGs (FDR < 0.05) \n
+    # Perturb-DEG pairs = {summary$significant_pairs}"),
+    
+    # cis-eQTL SNPs
+    "Total cis SNPs\nn = 8,932,843",
+    "Perturbed cis SNPs\nn = 3,881,333",
+    "Significant perturbed cis SNPs\nn = 466,942",
+    
+    # trans-eQTL SNPs
+    "Total trans SNPs\nn = 10,317",
+    "Effect trans SNPs\nn = 10,317",
+    "Significant effect trans SNPs\nn = 2,841"
+  ),
+  x = c(1, 2, 3,   # Perturbs
+        1, 2, 3,   # cis
+        1, 2, 3),  # trans
+  y = c(3, 3, 3,
+        2, 2, 2,
+        1, 1, 1)
+)
+
+# Define arrows between boxes
+df_arrows <- data.frame(
+  x = rep(c(1, 2), 3),
+  xend = rep(c(2, 3), 3),
+  y = rep(c(3, 2, 1), each = 2),
+  yend = rep(c(3, 2, 1), each = 2)
+)
+
+# Plot
+ggplot() +
+  geom_label(data = df_boxes, aes(x = x, y = y, label = label),
+             size = 4, fill = "white", color = "black", label.size = 0.5, label.r = unit(0.15, "lines")) +
+  geom_segment(data = df_arrows,
+               aes(x = x + 0.35, y = y, xend = xend - 0.35, yend = yend),
+               arrow = arrow(length = unit(0.2, "cm")), color = "gray30") +
+  theme_void() +
+  xlim(0.5, 3.5) +
+  ylim(0.5, 3.5) +
+  coord_fixed() +
+  ggtitle("Horizontal Filtering Workflow for Perturbation and eQTL Analysis")
+```
+

@@ -1,0 +1,78 @@
+```{r}
+library(tidyverse)
+library(data.table)
+library(here)
+library(ggrepel)
+```
+
+
+```{r}
+K562.bulk <- fread(here("data/perturb/pairs/K562/bulk_gaussian_trans_dat.csv"))
+K562.bulk.correct <- fread(here("data/perturb/pairs/K562/bulk_gaussian_trans_dat.csv"))
+K562.perturb <- fread(here("data/perturb/pairs/K562/bulk_pertubration_pairs.csv"))
+K562.qtl <- fread(here("data/perturb/pairs/K562/bulk_eQTL_pairs.csv"))
+```
+
+```{r}
+strong.qtls <- K562.qtl %>% filter(abs(Beta.perturb) > 0.3 & abs(Beta.effect) > 0.3) %>% mutate(pair = paste(perturbation, effect, sep="->"))
+
+K562.bulk$y %>% summary
+
+K562.qtl %>% group_by(perturbation) %>% filter(Beta.perturb==max(Beta.perturb)) %>% pull(Beta.effect) %>% summary
+
+strong.perturb <- K562.perturb %>% mutate(pair = paste(perturbation, effect, sep="->")) %>% filter(pair %in% strong.qtls$pair)
+
+
+strong <- merge(strong.perturb, strong.qtls, by="pair", suffixes = c(".perturb", ".qtl"))
+
+ggplot(strong, aes(x=avg_log2FC, y=Beta.effect)) + geom_point() + geom_text_repel(aes(label=pair), size=2)
+K562.bulk.correct
+```
+
+
+```{r}
+K562.bulk.correct <- fread(here("data/perturb/pairs/K562/bulk_gaussian_trans_dat.csv"))
+
+(K562.bulk.correct$y == K562.bulk$y) %>% table
+
+K562.bulk
+```
+
+
+
+
+
+```{r}
+NELFCD <- K562.bulk %>% filter(perturb=="NELFCD")
+
+ggplot(NELFCD, aes(x=x, y=y)) + geom_point()
+```
+
+
+```{r}
+bulk.sc <- merge(bulk, sc, by = c("perturb", "effect"), suffixes = c(".bulk", ".sc"))
+
+ggplot(bulk.sc, aes(x=x.bulk, y=x.sc)) + geom_point()
+
+cor(bulk.sc$x.sc, bulk.sc$x.bulk)
+```
+
+
+```{r}
+MYC.K562_cont <- K562_cont %>% filter(perturb == "SMARCE1")
+
+K562_cont %>% mutate(x = abs(x)) %>% group_by(perturb) %>% summarise(x = mean(x), num=length(effect)) %>% arrange(desc(x))
+ggplot(MYC.K562_cont, aes(x=x, y=y)) + geom_point() + geom_text_repel(aes(label=effect), size=3)
+
+```
+
+```{r}
+ggplot(MYC.K562_cont, aes(x=x, y=y)) + geom_point() + geom_text_repel(aes(label=effect), size=3)
+```
+
+```{r}
+ggplot(K562_cont, aes(x=x)) + geom_density()
+```
+
+
+

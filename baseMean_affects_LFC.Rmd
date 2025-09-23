@@ -1,0 +1,68 @@
+```{r}
+library(tidyverse)
+library(data.table)
+library(here)
+library(ggrepel)
+library(broom)
+
+theme_set(theme_bw())
+```
+
+```{r}
+Jurkat.perturb <- fread(here("data/perturb/pairs/Jurkat/bulk_pertubration_pairs.csv"))
+K562.perturb <- fread(here("data/perturb/pairs/K562/bulk_pertubration_pairs.csv"))
+
+# Select only efficient perturbations
+Jurkat.efficient_perturbations <- Jurkat.perturb %>%
+  filter(perturbation == effect) %>%
+  mutate(KD_eff = 2^avg_log2FC) %>%
+  filter(KD_eff < 0.3) %>%
+  pull(perturbation)
+
+K562.efficient_perturbations <- K562.perturb %>%
+  filter(perturbation == effect) %>%
+  mutate(KD_eff = 2^avg_log2FC) %>%
+  filter(KD_eff < 0.3) %>%
+  pull(perturbation)
+
+((Jurkat.perturb$perturbation %>% unique)%in% Jurkat.efficient_perturbations) %>% table %>% prop.table
+((K562.perturb$perturbation %>% unique)%in% K562.efficient_perturbations) %>% table %>% prop.table
+
+
+Jurkat.perturb <- Jurkat.perturb %>% filter(perturbation %in% Jurkat.efficient_perturbations)
+K562.perturb <- K562.perturb %>% filter(perturbation %in% K562.efficient_perturbations)
+
+Jurkat.perturb.ash <- fread(here("data/perturb/pairs/Jurkat/ash_bulk_pertubration_pairs_eff.csv"))
+K562.perturb.ash <- fread(here("data/perturb/pairs/K562/ash_bulk_pertubration_pairs_eff.csv"))
+
+```
+
+```{r}
+ggplot(Jurkat.perturb %>% filter(padj < 0.05), 
+       aes(x = baseMean, y = avg_log2FC, color=-log10(padj))) +
+  geom_point(alpha = 0.5, size = 0.8) +
+  scale_x_log10() +
+  #scale_y_log10() +
+  geom_vline(xintercept = 10, linetype = "dashed", color = "red") +  # threshold for low baseMean
+  labs(
+    x = "Baseline expression counts",
+    y = "logFC",
+    title = "High logFC among significant hits can be caused by low baseline expression (adjusted p-value < 0.05)"
+  ) +
+  theme_minimal()
+
+
+ggplot(K562.perturb %>% filter(padj < 0.05), 
+       aes(x = baseMean, y = avg_log2FC, color=-log10(padj))) +
+  geom_point(alpha = 0.5, size = 0.8) +
+  scale_x_log10() +
+  #scale_y_log10() +
+  geom_vline(xintercept = 10, linetype = "dashed", color = "red") +  # threshold for low baseMean
+  labs(
+    x = "Baseline expression counts",
+    y = "logFC",
+    title = "High logFC among significant hits can be caused by low baseline expression (adjusted p-value < 0.05)"
+  ) +
+  theme_minimal()
+```
+

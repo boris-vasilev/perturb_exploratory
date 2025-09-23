@@ -1,0 +1,61 @@
+```{r}
+library(tidyverse)
+library(data.table)
+library(here)
+library(ggrepel)
+
+theme_set(theme_bw())
+```
+
+```{r}
+Jurkat_TRADE <- fread(here("data/perturb/TRADE/summary_Jurkat_pseudo.tsv"))
+```
+
+```{r}
+ggplot(Jurkat_TRADE, aes(x=aff_genes, y=TI)) +
+  geom_point(size=0.5) +
+  geom_text_repel(aes(label = perturbation), size = 1.5)
+```
+
+```{r}
+Jurkat.qtl <- fread(here("data/perturb/pairs/Jurkat/bulk_eQTL_pairs.csv"))
+
+Jurkat.qtl.summary <- Jurkat.qtl %>%
+  group_by(perturbation) %>%
+  summarise(num_SNPs = length(unique(SNP)),
+            min_beta_cis = min(abs(Beta.perturb)),
+            max_beta_cis = max(abs(Beta.perturb)),
+            min_beta_trans = min(abs(Beta.effect)),
+            max_beta_trans = max(abs(Beta.effect)))
+
+```
+
+```{r}
+eQTL_TRADE_summary <- merge(Jurkat_TRADE, Jurkat.qtl.summary, by="perturbation")
+```
+
+```{r}
+ggplot(eQTL_TRADE_summary, aes(x=aff_genes, y=TI, size=num_SNPs)) +
+  geom_point() +
+  geom_text_repel(aes(label = perturbation), size = 1.5)
+```
+
+```{r}
+ggplot(eQTL_TRADE_summary, aes(x=aff_genes, y=TI, size=max_beta_cis)) +
+  geom_point() +
+  geom_text_repel(aes(label = perturbation), size = 1.5) +
+  labs(size = "max(abs(Beta_cis))")
+```
+
+```{r}
+eQTL_TRADE_summary %>% filter(perturbation == "BUD13")
+```
+
+```{r}
+Jurkat.qtl.all %>% pull(Beta.effect) %>% summary
+```
+
+```{r}
+TRADE.gene <- readRDS("/rds/project/rds-csoP2nj6Y6Y/biv22/AMD/data/perturb/TRADE/Jurkat_pseudo/BUD13.rds")
+```
+
