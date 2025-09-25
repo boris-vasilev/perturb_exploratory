@@ -1,27 +1,30 @@
 library(tidyverse)
-library(here)
+library(patchwork)
 library(glue)
 library(igraph)
 library(ggraph)
+library(argparse)
+
+parser <- ArgumentParser()
+parser$add_argument("--cells", type = "character", help = "Cell type/line", required = TRUE)
+
+args <- parser$parse_args()
+cells <- args$cells
 
 
-jurkat <- read_csv(here("data/perturb/pairs/bulk_Jurkat/bulk_gaussian_ratio_dat_eff0.05.csv"))
-k562 <- read_csv(here("data/perturb/pairs/bulk_K562_essential/bulk_gaussian_ratio_dat_eff0.05.csv"))
+# sign_table <- table(sign(perturb_dat$x), sign(perturb_dat$y))
 
-jurkat.table <- table(sign(jurkat$x), sign(jurkat$y))
-k562.table <- table(sign(k562$x), sign(k562$y))
+plot_sign_concordance_graph <- function(cells) {
 
+  perturb_dat <- read_csv(glue("/rds/project/rds-csoP2nj6Y6Y/biv22/data/pairs/{cells}/gaussian_ratio_dat_eff.csv"))
 
-plot_sign_concordance_graph <- function(dataset) {
-  df <- if(dataset == "Jurkat") jurkat else k562
-  
   # Add column for sign comparison
-  df <- df %>% 
+  perturb_dat <- perturb_dat %>% 
     mutate(Sign = ifelse(sign(x) == sign(y), "Same (discordant effect)", "Opposite (concordant effect)"))
   
   
   # Create edge list for igraph
-  edges <- df %>%
+  edges <- perturb_dat %>%
     select(from = perturb, to = effect, Sign)
   
   # Create graph
@@ -34,18 +37,18 @@ plot_sign_concordance_graph <- function(dataset) {
     geom_node_text(aes(label = name), repel = TRUE, size = 3) +
     scale_edge_color_manual(values = c("Same (discordant effect)" = "black", "Opposite (concordant effect)" = "red")) +
     theme_void() +
-    ggtitle(glue("{dataset}")) +
+    ggtitle(glue("{cells}")) +
     theme(plot.title = element_text(size = 18, face = "bold", hjust = 0.5))
   
   return(p)
   
 }
 
-plot_sign_concordance_graph.multi <- function() {
-  p.J <- plot_sign_concordance_graph("Jurkat")
-  p.K <- plot_sign_concordance_graph("K562")
+plot_sign_concordance_graph.multi <- function(cells1, cells2) {
+  p1 <- plot_sign_concordance_graph(cells1)
+  p2 <- plot_sign_concordance_graph(cells2)
   
-  combined_plot <- p.J + p.K +
+  combined_plot <- p1 + p2 +
     plot_annotation(tag_levels = 'A',
                     title="Sign Concordance Networks",
                     theme = theme(
@@ -53,7 +56,7 @@ plot_sign_concordance_graph.multi <- function() {
                     )) +
     plot_layout(guides = "collect") 
   ggsave(
-    filename = here(glue("plots/genes/sign_networks.png")),
+    filename = glue("/rds/project/rds-csoP2nj6Y6Y/biv22/perturb_exploratory/plots/sign_networks_{cells1}_{cells2}.png"),
     plot = combined_plot,
     width = 16, height = 8, dpi = 300
   )
