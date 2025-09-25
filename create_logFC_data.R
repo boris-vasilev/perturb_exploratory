@@ -15,8 +15,10 @@ DEG_files <- list.files(glue("/rds/project/rds-csoP2nj6Y6Y/biv22/data/perturb/{c
 n_cores <- 32
 
 DEGs <- mclapply(DEG_files, function(f) {
-  fread(f) %>% select(gene, log2FoldChange)
-}, mc.cores = n_cores)
+  fname <- basename(f)
+  message("Reading: ", fname)
+  data.table::fread(f)
+}, mc.cores = n_cores, mc.preschedule = FALSE)
 
 names(DEGs) <- sub("\\.csv$", "", basename(DEG_files))
 logFC_dt <- rbindlist(DEGs, idcol = "perturbation")
