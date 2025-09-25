@@ -16,10 +16,10 @@ n_cores <- 32
 
 DEGs <- mclapply(DEG_files, function(f) {
   fname <- basename(f)
-  message("Reading: ", fname)
-  data.table::fread(f)
+  message("Reading: ", f)
+  fread(f) %>% select(perturbation, gene, log2FoldChange)
 }, mc.cores = n_cores, mc.preschedule = FALSE)
 
-names(DEGs) <- sub("\\.csv$", "", basename(DEG_files))
+names(DEGs) <- sub("\\.tsv$", "", basename(DEG_files))
 logFC_dt <- rbindlist(DEGs, idcol = "perturbation")
 fwrite(logFC_dt, glue("/rds/project/rds-csoP2nj6Y6Y/biv22/data/pairs/{cells}/logFC_dat.csv"))
