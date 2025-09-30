@@ -17,7 +17,7 @@ n_cores <- 32
 DEGs <- mclapply(DEG_files, function(f) {
   fname <- basename(f)
   message("Reading: ", f)
-  fread(f) %>% select(gene, log2FoldChange)
+  fread(f) %>% select(gene, log2FoldChange, padj)
 }, mc.cores = n_cores, mc.preschedule = FALSE)
 
 names(DEGs) <- sub("\\.tsv$", "", basename(DEG_files))
