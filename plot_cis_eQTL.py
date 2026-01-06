@@ -29,13 +29,13 @@ parser.add_argument(
 
 args = parser.parse_args()
 ## Example usage:
-# args = argparse.Namespace(
-#     gene="CSNK2B",
-#     mark_lead=True,
-#     selected_snp="rs4151657",
-#     data="eQTLgen",
-#     out="locuszoom_CSNK2B_eQTLgen.png",
-# )
+args = argparse.Namespace(
+    gene="CSNK2B",
+    mark_lead=True,
+    selected_snp="rs4151657",
+    data="eQTLgen",
+    out="locuszoom_CSNK2B_eQTLgen.png",
+)
 
 if args.data == "eQTLgen":
     selected_cols = [
@@ -119,7 +119,7 @@ def locuszoom_plot(
 
     fig, ax = plt.subplots(figsize=(10, 5))
 
-    # Non-significant
+    # Non-significant SNPs
     ax.scatter(
         pdf.loc[~sig, "SNPPos"],
         pdf.loc[~sig, "neglog10p"],
@@ -129,7 +129,7 @@ def locuszoom_plot(
         zorder=1,
     )
 
-    # Significant
+    # Significant SNPs
     ax.scatter(
         pdf.loc[sig, "SNPPos"],
         pdf.loc[sig, "neglog10p"],
@@ -146,10 +146,21 @@ def locuszoom_plot(
             lead["SNPPos"],
             lead["neglog10p"],
             c="red",
-            s=60,
+            s=70,
             marker="*",
             label="Lead SNP",
             zorder=3,
+        )
+
+        ax.annotate(
+            lead_snp,
+            (lead["SNPPos"].values[0], lead["neglog10p"].values[0]),
+            xytext=(0, 8),
+            textcoords="offset points",
+            ha="center",
+            fontsize=9,
+            color="red",
+            weight="bold",
         )
 
     # Selected SNP
@@ -165,6 +176,17 @@ def locuszoom_plot(
             zorder=3,
         )
 
+        ax.annotate(
+            selected_snp,
+            (sel["SNPPos"].values[0], sel["neglog10p"].values[0]),
+            xytext=(0, 8),
+            textcoords="offset points",
+            ha="center",
+            fontsize=9,
+            color="darkorange",
+            weight="bold",
+        )
+
     # Gene TSS
     ax.axvline(
         gene_pos,
@@ -175,7 +197,7 @@ def locuszoom_plot(
         zorder=0,
     )
 
-    # Labels
+    # Labels and title
     ax.set_xlabel(f"Position on chr{chrom}")
     ax.set_ylabel(r"$-\log_{10}(p)$")
     ax.set_title(f"cis-eQTL locus: {gene}")
