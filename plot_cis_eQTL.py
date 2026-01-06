@@ -29,13 +29,13 @@ parser.add_argument(
 
 args = parser.parse_args()
 ## Example usage:
-args = argparse.Namespace(
-    gene="CSNK2B",
-    mark_lead=True,
-    selected_snp="rs4151657",
-    data="eQTLgen",
-    out="locuszoom_CSNK2B_eQTLgen.png",
-)
+# args = argparse.Namespace(
+#     gene="CSNK2B",
+#     mark_lead=True,
+#     selected_snp="rs4151657",
+#     data="eQTLgen",
+#     out="locuszoom_CSNK2B_eQTLgen.png",
+# )
 
 if args.data == "eQTLgen":
     selected_cols = [
