@@ -110,5 +110,5 @@ perturb_DEGs <- jurkat.perturb %>% filter(perturbation == "NAA25") %>% pull(effe
 which(perturb_DEGs %in% trans_genes) %>% length()
 length(perturb_DEGs)
 
-cis_eQTL <- fread(here("data/summary_stats/cis_eQTLs_eQTLgen.txt"),
+cis_eQTL <- fread(here("data/summary_stats/cis_eQTLs_eQTLgen.tsv"),
                   sep = "\t")

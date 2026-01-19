@@ -2,6 +2,7 @@ import polars as pl
 import argparse
 import numpy as np
 import matplotlib.pyplot as plt
+from magenpy import LDMatrix
 
 
 parser = argparse.ArgumentParser(description="Load cis-eQTL data")
@@ -103,6 +104,7 @@ def locuszoom_plot(
     # Identify lead SNP (smallest p-value)
     lead_idx = pdf["Pvalue"].idxmin()
     lead_snp = pdf.loc[lead_idx, "SNP"]
+    lead_SNP_pos = pdf.loc[lead_idx, "SNPPos"]
 
     # Gene TSS
     gene_pos = pdf["GenePos"].iloc[0]
@@ -116,6 +118,15 @@ def locuszoom_plot(
 
     # Significance mask
     sig = pdf["FDR"] < fdr_thresh
+
+    # Load LD matrix
+    ld = LDMatrix.from_path(f"/rds/project/rds-csoP2nj6Y6Y/biv22/data/LD/chr_{chrom}")
+
+    lead_idx = np.where(ld.snps == lead_snp)[0][0]
+
+    _, ld_indices = ld.getrow(lead_idx, return_indices=True)
+
+    pdf["in_ld"] = pdf["SNP"].isin(ld.snps[ld_indices])
 
     fig, ax = plt.subplots(figsize=(10, 5))
 
@@ -137,6 +148,18 @@ def locuszoom_plot(
         s=15,
         label="FDR < 0.05",
         zorder=2,
+    )
+
+    # SNPs in LD with lead SNP (outline)
+    ax.scatter(
+        pdf.loc[pdf["in_ld"], "SNPPos"],
+        pdf.loc[pdf["in_ld"], "neglog10p"],
+        facecolors="none",
+        edgecolors="purple",
+        s=40,
+        linewidths=0.8,
+        label="In LD with lead SNP",
+        zorder=2.5,
     )
 
     # Lead SNP

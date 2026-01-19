@@ -20,7 +20,7 @@ base_expression_paths <- file.path(QC_dir, cell_lines, "base_expression.csv")
 pairs_list <- lapply(pairs_paths, fread)
 base_expression_list <- lapply(base_expression_paths, fread)
 
-# Optionally, add a column indicating the cell line
+# Add a column indicating the cell line
 pairs_list <- Map(function(df, cl) {
   df$cell_line <- cl
   df
@@ -192,3 +192,4 @@ ggsave(
     width = 8, height = 8, dpi = 300
   )
 
+writeLines(common_expressed_genes, file.path(QC_dir, "common_expressed_genes.txt"))
