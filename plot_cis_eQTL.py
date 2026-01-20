@@ -219,7 +219,7 @@ def locuszoom_plot(
         zorder=2,
     )
 
-    # SNPs in LD with lead SNP (outline)
+    # SNPs in LD matrix
     ax.scatter(
         pdf.loc[pdf["in_ld"], "SNPPos"],
         pdf.loc[pdf["in_ld"], "neglog10p"],
@@ -227,7 +227,7 @@ def locuszoom_plot(
         edgecolors="purple",
         s=40,
         linewidths=0.8,
-        label="In LD with lead SNP",
+        label="In LD matrix?",
         zorder=2.5,
     )
 
