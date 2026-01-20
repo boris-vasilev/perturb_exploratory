@@ -2,7 +2,81 @@ import polars as pl
 import argparse
 import numpy as np
 import matplotlib.pyplot as plt
-from magenpy import LDMatrix
+import hail as hl
+
+# from hail.linalg import BlockMatrix
+
+
+# Configure Hail for S3 access
+hl.init(
+    spark_conf={
+        "spark.jars.packages": "org.apache.hadoop:hadoop-aws:3.3.4",
+        "spark.hadoop.fs.s3a.impl": "org.apache.hadoop.fs.s3a.S3AFileSystem",
+        # Use ~/.aws/credentials
+        "spark.hadoop.fs.s3a.aws.credentials.provider": "com.amazonaws.auth.DefaultAWSCredentialsProviderChain",
+        # REQUIRED for pan-ukb
+        "spark.hadoop.fs.s3a.requester.pays.enabled": "true",
+    }
+)
+
+# def read_ld_matrix(chrom, start_pos, end_pos, cis_eQTL_snps):
+#     # Read variant indices table
+#     ht_idx = hl.read_table(
+#         "s3a://pan-ukb-us-east-1/ld_release/UKBB.EUR.ldadj.variant.ht"
+#     )
+
+#     # Load LD matrix
+#     bm = BlockMatrix.read("s3a://pan-ukb-us-east-1/ld_release/UKBB.EUR.ldadj.bm")
+
+#     # Create interval for region
+#     interval = hl.parse_locus_interval(f"{chrom}:{start_pos}-{end_pos}")
+
+#     # Filter variants in the region
+#     ht_idx_region = ht_idx.filter(interval.contains(ht_idx.locus))
+
+#     # Filter to only variants tested for cis-eQTLs for the gene of interest
+#     rsids_eqtl = cis_eQTL_snps.to_pandas()
+#     ht_rsids_eqtl = hl.Table.from_pandas(rsids_eqtl)
+#     ht_rsids_eqtl = ht_rsids_eqtl.rename({'SNP': 'rsid'}).key_by('rsid')
+
+#     ht_idx_by_rsid = ht_idx_region.key_by('rsid')
+#     ht_idx_region_tested = ht_idx_by_rsid.join(ht_rsids_eqtl, how='inner')
+#     ht_idx_region_tested = ht_idx_region_tested.key_by('locus', 'alleles')
+
+#     idx = ht_idx_region_tested.idx.collect()
+
+#     # Filter LD matrix to region
+#     bm = bm.filter(idx, idx)
+
+#     # Export filtered LD matrix to flat file
+#     bm.write('/home/biv22/rds/rds-mrc-bsu-csoP2nj6Y6Y/biv22/perturb_exploratory/data/LD_loci/CSNK2B', force_row_major=True)
+#     BlockMatrix.export(
+#         '/home/biv22/rds/rds-mrc-bsu-csoP2nj6Y6Y/biv22/perturb_exploratory/data/LD_loci/CSNK2B',
+#         '/home/biv22/rds/rds-mrc-bsu-csoP2nj6Y6Y/biv22/perturb_exploratory/data/LD_loci/CSNK2B.bgz',
+#         delimiter=' '
+#     )
+
+
+def check_snps_in_ld_matrix(chrom, start_pos, end_pos, snps):
+    # Read variant indices table
+    ht_idx = hl.read_table(
+        "s3a://pan-ukb-us-east-1/ld_release/UKBB.EUR.ldadj.variant.ht"
+    )
+
+    # Create interval for region
+    interval = hl.parse_locus_interval(f"{chrom}:{start_pos}-{end_pos}")
+
+    # Filter variants in the region
+    ht_idx_region = ht_idx.filter(interval.contains(ht_idx.locus))
+
+    # eQTL SNP set -> broadcast
+    rsid_set = hl.literal(set(snps["SNP"].to_list()))
+
+    # Filter LD index only by rsIDs of interest
+    ht_idx_subset = ht_idx_region.filter(rsid_set.contains(ht_idx_region.rsid))
+
+    # Return list of rsIDs present in LD matrix
+    return ht_idx_subset.rsid.collect()
 
 
 parser = argparse.ArgumentParser(description="Load cis-eQTL data")
@@ -119,14 +193,9 @@ def locuszoom_plot(
     # Significance mask
     sig = pdf["FDR"] < fdr_thresh
 
-    # Load LD matrix
-    ld = LDMatrix.from_path(f"/rds/project/rds-csoP2nj6Y6Y/biv22/data/LD/chr_{chrom}")
+    SNPs_in_LD_matrix = check_snps_in_ld_matrix(chrom, lo, hi, pdf["SNP"])
 
-    lead_idx = np.where(ld.snps == lead_snp)[0][0]
-
-    _, ld_indices = ld.getrow(lead_idx, return_indices=True)
-
-    pdf["in_ld"] = pdf["SNP"].isin(ld.snps[ld_indices])
+    pdf["in_ld"] = pdf["SNP"].isin(SNPs_in_LD_matrix)
 
     fig, ax = plt.subplots(figsize=(10, 5))
 
