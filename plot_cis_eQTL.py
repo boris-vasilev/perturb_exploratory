@@ -70,7 +70,7 @@ def check_snps_in_ld_matrix(chrom, start_pos, end_pos, snps):
     ht_idx_region = ht_idx.filter(interval.contains(ht_idx.locus))
 
     # eQTL SNP set -> broadcast
-    rsid_set = hl.literal(set(snps["SNP"].to_list()))
+    rsid_set = hl.literal(set(snps.to_list()))
 
     # Filter LD index only by rsIDs of interest
     ht_idx_subset = ht_idx_region.filter(rsid_set.contains(ht_idx_region.rsid))
