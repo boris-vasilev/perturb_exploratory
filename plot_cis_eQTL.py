@@ -79,6 +79,41 @@ def check_snps_in_ld_matrix(chrom, start_pos, end_pos, snps):
     return ht_idx_subset.rsid.collect()
 
 
+def get_r2_between_snps(snp1, snp2):
+    # Read variant indices table
+    ht_idx = hl.read_table(
+        "s3a://pan-ukb-us-east-1/ld_release/UKBB.EUR.ldadj.variant.ht"
+    )
+
+    # Load LD matrix
+    bm = hl.linalg.BlockMatrix.read(
+        "s3a://pan-ukb-us-east-1/ld_release/UKBB.EUR.ldadj.bm"
+    )
+
+    # Variants provided as Chr:Pos:Ref:Alt strings which get parsed in the
+    # appropriate locus alleles struct to reference the Hail table
+    variants = [
+        hl.parse_variant(snp1),
+        hl.parse_variant(snp2),
+    ]
+
+    # Filter the variant index table to only the two variants of interest
+    # and select their indices (to match in the LD BlockMatrix)
+    ht_idx = ht_idx.filter(
+        hl.literal(variants).contains(
+            hl.struct(locus=ht_idx.locus, alleles=ht_idx.alleles)
+        )
+    )
+    idx = ht_idx.idx.collect()
+
+    # Get correlation from LD matrix.
+    # Sort indices first because the LD matrix is symmetric but only the lower triangle is stored.
+    i, j = sorted(idx)
+    r = bm[i, j]
+
+    return r**2
+
+
 parser = argparse.ArgumentParser(description="Load cis-eQTL data")
 
 parser.add_argument("--gene", type=str, required=True, help="Gene name")
@@ -123,6 +158,8 @@ if args.data == "eQTLgen":
         "SNPChr",
         "GeneChr",
         "GenePos",
+        "AssessedAllele",
+        "OtherAllele",
     ]
 
     cis_eQTL = (
@@ -176,13 +213,43 @@ def locuszoom_plot(
     pdf["neglog10p"] = -np.log10(pdf["Pvalue"])
 
     # Identify lead SNP (smallest p-value)
-    lead_idx = pdf["Pvalue"].idxmin()
-    lead_snp = pdf.loc[lead_idx, "SNP"]
-    lead_SNP_pos = pdf.loc[lead_idx, "SNPPos"]
+    lead_snp = df.sort("Pvalue").select("SNP").row(0)[0]
+
+    # Select chromosome of selected SNP (same chromosome as gene and lead SNP)
+    chrom = df.filter(pl.col("SNP") == selected_snp).select("SNPChr").item()
+
+    lead_snp_id = (
+        df.filter(pl.col("SNP") == lead_snp)
+        .select(
+            pl.format(
+                "{}:{}:{}:{}",
+                pl.col("SNPChr"),
+                pl.col("SNPPos"),
+                pl.col("OtherAllele"),
+                pl.col("AssessedAllele"),
+            ).alias("SNP_id")
+        )
+        .item()
+    )
+
+    selected_snp_id = (
+        df.filter(pl.col("SNP") == selected_snp)
+        .select(
+            pl.format(
+                "{}:{}:{}:{}",
+                pl.col("SNPChr"),
+                pl.col("SNPPos"),
+                pl.col("OtherAllele"),
+                pl.col("AssessedAllele"),
+            ).alias("SNP_id")
+        )
+        .item()
+    )
+
+    lead_selected_r2 = get_r2_between_snps(lead_snp_id, selected_snp_id)
 
     # Gene TSS
     gene_pos = pdf["GenePos"].iloc[0]
-    chrom = pdf["SNPChr"].iloc[0]
 
     # Optional zoom window
     if window_kb is not None:
@@ -229,6 +296,17 @@ def locuszoom_plot(
         linewidths=0.8,
         label="In LD matrix?",
         zorder=2.5,
+    )
+
+    ax.text(
+        0.02,
+        0.98,
+        rf"$r^2$(lead, selected) = {lead_selected_r2:.3f}",
+        transform=ax.transAxes,
+        ha="left",
+        va="top",
+        fontsize=10,
+        bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="gray", alpha=0.8),
     )
 
     # Lead SNP
