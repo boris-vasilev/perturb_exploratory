@@ -90,11 +90,25 @@ def get_r2_between_snps(snp1, snp2):
         "s3a://pan-ukb-us-east-1/ld_release/UKBB.EUR.ldadj.bm"
     )
 
+    def flip_variant(v):
+        chrom, pos, a1, a2 = v.split(":")
+        return f"{chrom}:{pos}:{a2}:{a1}"
+
+    flipped_snp1 = flip_variant(snp1)
+    flipped_snp2 = flip_variant(snp2)
+
     # Variants provided as Chr:Pos:Ref:Alt strings which get parsed in the
     # appropriate locus alleles struct to reference the Hail table
     variants = [
         hl.parse_variant(snp1),
         hl.parse_variant(snp2),
+        # To resolve issues with allele ordering (flipped ref/alt in LD matrix)
+        # Because only one will exist in the LD matrix this will end up being
+        # only 2 variants in the output
+        hl.parse_variant(flipped_snp1),
+        hl.parse_variant(flipped_snp2),
+        # TODO: resolve ambiguities such as strand flips
+        # TODO: drop those that cannot be resolved
     ]
 
     # Filter the variant index table to only the two variants of interest
@@ -139,13 +153,13 @@ parser.add_argument(
 
 args = parser.parse_args()
 ## Example usage:
-# args = argparse.Namespace(
-#     gene="CSNK2B",
-#     mark_lead=True,
-#     selected_snp="rs4151657",
-#     data="eQTLgen",
-#     out="locuszoom_CSNK2B_eQTLgen.png",
-# )
+args = argparse.Namespace(
+    gene="PXK",
+    mark_lead=True,
+    selected_snp="rs9311676",
+    data="eQTLgen",
+    out="locuszoom_PXK_eQTLgen.png",
+)
 
 if args.data == "eQTLgen":
     selected_cols = [
