@@ -27,6 +27,6 @@ IFS=',' read -r SNP cis_gene <<< "$LINE"
 
 echo "Task ${SLURM_ARRAY_TASK_ID}: SNP=${SNP}, gene=${cis_gene}"
 
-python plot_cis_eQTL.py \
+python create_LD_matrix.py \
     --gene "${cis_gene}" \
     --window 1000
