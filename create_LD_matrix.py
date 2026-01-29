@@ -13,20 +13,20 @@ import argparse
 import hail as hl
 
 
-# Configure Hail for S3 access
-hl.init(
-    spark_conf={
-        "spark.jars.packages": "org.apache.hadoop:hadoop-aws:3.3.4",
-        "spark.hadoop.fs.s3a.impl": "org.apache.hadoop.fs.s3a.S3AFileSystem",
-        # Use ~/.aws/credentials
-        "spark.hadoop.fs.s3a.aws.credentials.provider": "com.amazonaws.auth.DefaultAWSCredentialsProviderChain",
-        # REQUIRED for pan-ukb
-        "spark.hadoop.fs.s3a.requester.pays.enabled": "true",
-    }
-)
-
-
 def create_ld_matrix(gene_name, lead_snp, chrom, start_pos, end_pos):
+    # Configure Hail for S3 access
+    hl.init(
+        spark_conf={
+            "spark.jars.packages": "org.apache.hadoop:hadoop-aws:3.3.4",
+            "spark.hadoop.fs.s3a.impl": "org.apache.hadoop.fs.s3a.S3AFileSystem",
+            # Use ~/.aws/credentials
+            "spark.hadoop.fs.s3a.aws.credentials.provider": "com.amazonaws.auth.DefaultAWSCredentialsProviderChain",
+            # REQUIRED for pan-ukb
+            "spark.hadoop.fs.s3a.requester.pays.enabled": "true",
+        },
+        idempotent=True,  # Run init only once
+    )
+
     # Read variant indices table
     ht_idx = hl.read_table(
         "s3a://pan-ukb-us-east-1/ld_release/UKBB.EUR.ldadj.variant.ht"
@@ -86,6 +86,8 @@ args = parser.parse_args()
 # Example args for testing
 # args = argparse.Namespace(gene="PXK", window=1000)
 
+args = argparse.Namespace(gene="HBS1L", window=1000)
+
 # Read cis-eQTL data for the specified gene
 
 selected_cols = [
@@ -100,6 +102,7 @@ selected_cols = [
     "GenePos",
     "AssessedAllele",
     "OtherAllele",
+    "NrSamples",
 ]
 
 cis_eQTL = (
@@ -110,6 +113,11 @@ cis_eQTL = (
     .select(selected_cols)
     .filter(pl.col("GeneSymbol") == args.gene)
     .collect()
+)
+
+# Save cis-eQTL summary stats for the gene
+cis_eQTL.write_csv(
+    f"/home/biv22/rds/rds-mrc-bsu-csoP2nj6Y6Y/biv22/perturb_exploratory/data/LD_loci/{args.gene}_cis_eQTLs.tsv",
 )
 
 lead_snp, lead_snp_chr, lead_snp_pos = (

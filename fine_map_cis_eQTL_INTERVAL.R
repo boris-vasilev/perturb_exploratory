@@ -97,5 +97,5 @@ manhattan_plot <- ggplot(eqtl_susie, aes(x=pos_b37, y=-log10(pval_nominal))) +
   geom_label_repel( data=subset(eqtl_susie, eqtl_susie$cs!=-1), aes(label=variant_id), size=4, max.overlaps = 20) +
   labs(title=gene, color="Credible Set")
 
-saveRDS(susie_fit, glue(here("finemap_fit/∫{gene}_INTERVAL_finemap_susieR.rds")))
+saveRDS(susie_fit, glue(here("finemap_fit/{gene}_INTERVAL_susieR.rds")))
 ggsave(here(glue("plots/{gene}_INTERVAL_finemap_manhattan.png")), manhattan_plot, width=10, height=6)
