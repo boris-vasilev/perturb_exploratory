@@ -148,7 +148,7 @@ def locuszoom_plot_interval(
     gene_id = gene_info.select("phenotype_id").item()
 
     # Extract chromosome from first locus
-    first_locus = snps.select("locus").item(0)
+    first_locus = snps["locus"][0]
     chrom = first_locus.split(":")[0]
 
     # Get gene position (use median of SNP positions as proxy for TSS)
