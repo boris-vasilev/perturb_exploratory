@@ -99,10 +99,8 @@ def align_eqtl_to_snps(eqtl_data, snps):
 
 def locuszoom_plot_interval(
     gene,
-    gene_id,
     selected_snp,
     out,
-    snp_dir="/rds/project/rds-csoP2nj6Y6Y/biv22/perturb_exploratory/data/LD_loci",
     eqtl_dir="/rds/project/rds-csoP2nj6Y6Y/biv22/data/eqtl/INTERVAL_eQTL_summary_statistics",
     ld_dir="/rds/project/rds-csoP2nj6Y6Y/biv22/perturb_exploratory/data/LD_loci",
     mark_lead=True,
@@ -117,8 +115,6 @@ def locuszoom_plot_interval(
     ----------
     gene : str
         Gene symbol (e.g., 'COPZ1')
-    gene_id : str
-        Ensembl gene ID (e.g., 'ENSG00000120645')
     selected_snp : str
         SNP to highlight (rsID)
     out : str
@@ -140,39 +136,22 @@ def locuszoom_plot_interval(
     """
 
     # Load SNP info
-    snp_file = Path(snp_dir) / f"{gene}_SNPs.tsv"
+    snp_file = Path(ld_dir) / f"{gene}_SNPs.tsv"
     if not snp_file.exists():
         raise FileNotFoundError(f"SNP file not found: {snp_file}")
 
     snps = pl.read_csv(snp_file, separator="\t")
 
-    # Load gene-specific p-value threshold from phenotype summary if not provided
-    if pval_thresh is None:
-        phenotype_summary_file = Path(eqtl_dir) / "INTERVAL_eQTL_phenotype_summary.tsv"
-        if phenotype_summary_file.exists():
-            phenotype_summary = pl.read_csv(phenotype_summary_file, separator="\t")
-            gene_info = phenotype_summary.filter(pl.col("phenotype_id") == gene_id)
+    # Load gene-specific p-value threshold from INTERVAL phenotype summary (based on FDR < 0.05)
+    phenotype_summary_file = Path(eqtl_dir) / "INTERVAL_eQTL_phenotype_summary.tsv"
+    phenotype_summary = pl.read_csv(phenotype_summary_file, separator="\t")
+    gene_info = phenotype_summary.filter(pl.col("gene_name") == gene)
 
-            if len(gene_info) > 0:
-                pval_thresh = gene_info.select("pval_nominal_threshold").item(
-                    row=0, column=0
-                )
-                print(f"Using gene-specific p-value threshold: {pval_thresh:.2e}")
-            else:
-                print(
-                    f"Warning: Gene {gene_id} not found in phenotype summary, using default threshold 5e-8"
-                )
-                pval_thresh = 5e-8
-        else:
-            print(
-                f"Warning: Phenotype summary file not found, using default threshold 5e-8"
-            )
-            pval_thresh = 5e-8
-    else:
-        print(f"Using provided p-value threshold: {pval_thresh:.2e}")
+    pval_thresh = gene_info.select("pval_nominal_threshold").item()
+    gene_id = gene_info.select("phenotype_id").item()
 
     # Extract chromosome from first locus
-    first_locus = snps.select("locus").item(row=0, column=0)
+    first_locus = snps["locus"][0]
     chrom = first_locus.split(":")[0]
 
     # Get gene position (use median of SNP positions as proxy for TSS)
@@ -403,12 +382,6 @@ if __name__ == "__main__":
         "--gene", type=str, required=True, help="Gene symbol (e.g., COPZ1)"
     )
     parser.add_argument(
-        "--gene_id",
-        type=str,
-        required=True,
-        help="Ensembl gene ID (e.g., ENSG00000120645)",
-    )
-    parser.add_argument(
         "--selected_snp",
         type=str,
         required=True,
@@ -416,12 +389,6 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--out", type=str, required=True, help="Output path for locuszoom plot"
-    )
-    parser.add_argument(
-        "--snp_dir",
-        type=str,
-        default="/rds/project/rds-csoP2nj6Y6Y/biv22/perturb_exploratory/data/LD_loci",
-        help="Directory containing SNP files",
     )
     parser.add_argument(
         "--eqtl_dir",
@@ -465,15 +432,10 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    # Example usage:
-    # python plot_cis_eQTL_INTERVAL.py --gene COPZ1 --gene_id ENSG00000120645 --selected_snp rs11170507 --out locuszoom_COPZ1_INTERVAL.png
-
     locuszoom_plot_interval(
         gene=args.gene,
-        gene_id=args.gene_id,
         selected_snp=args.selected_snp,
         out=args.out,
-        snp_dir=args.snp_dir,
         eqtl_dir=args.eqtl_dir,
         ld_dir=args.ld_dir,
         mark_lead=args.mark_lead,
