@@ -145,7 +145,7 @@ def locuszoom_plot_interval(
     gene_info = phenotype_summary.filter(pl.col("gene_name") == gene)
 
     pval_thresh = gene_info.select("pval_nominal_threshold").item()
-    gene_id = gene_info.select("gene_id").item()
+    gene_id = gene_info.select("phenotype_id").item()
 
     # Extract chromosome from first locus
     first_locus = snps.select("locus").item(0)
