@@ -4,6 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
 import glob
+import gzip
 
 
 def load_interval_eqtl_for_gene(gene_id, chromosome, snp_rsids, eqtl_dir):
@@ -98,8 +99,10 @@ def align_eqtl_to_snps(eqtl_data, snps):
 
 def locuszoom_plot_interval(
     gene,
+    gene_id,
     selected_snp,
     out,
+    snp_dir="/rds/project/rds-csoP2nj6Y6Y/biv22/perturb_exploratory/data/LD_loci",
     eqtl_dir="/rds/project/rds-csoP2nj6Y6Y/biv22/data/eqtl/INTERVAL_eQTL_summary_statistics",
     ld_dir="/rds/project/rds-csoP2nj6Y6Y/biv22/perturb_exploratory/data/LD_loci",
     mark_lead=True,
@@ -114,10 +117,14 @@ def locuszoom_plot_interval(
     ----------
     gene : str
         Gene symbol (e.g., 'COPZ1')
+    gene_id : str
+        Ensembl gene ID (e.g., 'ENSG00000120645')
     selected_snp : str
         SNP to highlight (rsID)
     out : str
         Output file path for plot
+    snp_dir : str
+        Directory containing SNP info files
     eqtl_dir : str
         Directory containing INTERVAL eQTL summary statistics
     ld_dir : str
@@ -133,29 +140,46 @@ def locuszoom_plot_interval(
     """
 
     # Load SNP info
-    snp_file = Path(ld_dir) / f"{gene}_SNPs.tsv"
+    snp_file = Path(snp_dir) / f"{gene}_SNPs.tsv"
     if not snp_file.exists():
         raise FileNotFoundError(f"SNP file not found: {snp_file}")
 
     snps = pl.read_csv(snp_file, separator="\t")
 
-    # Load gene-specific p-value threshold from INTERVAL phenotype summary (based on FDR < 0.05)
-    phenotype_summary_file = Path(eqtl_dir) / "INTERVAL_eQTL_phenotype_summary.tsv"
-    phenotype_summary = pl.read_csv(phenotype_summary_file, separator="\t")
-    gene_info = phenotype_summary.filter(pl.col("gene_name") == gene)
+    # Load gene-specific p-value threshold from phenotype summary if not provided
+    if pval_thresh is None:
+        phenotype_summary_file = Path(eqtl_dir) / "INTERVAL_eQTL_phenotype_summary.tsv"
+        if phenotype_summary_file.exists():
+            phenotype_summary = pl.read_csv(phenotype_summary_file, separator="\t")
+            gene_info = phenotype_summary.filter(pl.col("phenotype_id") == gene_id)
 
-    pval_thresh = gene_info.select("pval_nominal_threshold").item()
-    gene_id = gene_info.select("phenotype_id").item()
+            if len(gene_info) > 0:
+                pval_thresh = gene_info.select("pval_nominal_threshold").item(
+                    row=0, column=0
+                )
+                print(f"Using gene-specific p-value threshold: {pval_thresh:.2e}")
+            else:
+                print(
+                    f"Warning: Gene {gene_id} not found in phenotype summary, using default threshold 5e-8"
+                )
+                pval_thresh = 5e-8
+        else:
+            print(
+                f"Warning: Phenotype summary file not found, using default threshold 5e-8"
+            )
+            pval_thresh = 5e-8
+    else:
+        print(f"Using provided p-value threshold: {pval_thresh:.2e}")
 
     # Extract chromosome from first locus
-    first_locus = snps["locus"][0]
+    first_locus = snps.select("locus").item(row=0, column=0)
     chrom = first_locus.split(":")[0]
 
     # Get gene position (use median of SNP positions as proxy for TSS)
     snps = snps.with_columns(
         pl.col("locus").str.split(":").list.get(1).cast(pl.Int64).alias("pos_b37")
     )
-    gene_pos = snps.select(pl.col("pos_b37").median()).item()
+    gene_pos = snps.select(pl.col("pos_b37").median()).item(row=0, column=0)
 
     # Load INTERVAL eQTL data for this gene
     eqtl_data = load_interval_eqtl_for_gene(
@@ -190,6 +214,35 @@ def locuszoom_plot_interval(
     # Significance mask
     sig = pdf["pval_nominal"] < pval_thresh
 
+    # Check which SNPs are in the LD matrix
+    # The LD matrix contains SNPs that were used in the finemapping
+    # These correspond to the indices in the SNP file
+    ld_files = glob.glob(str(Path(ld_dir) / f"{gene}_*.bgz"))
+    snps_in_ld = set()
+    ld_matrix = None
+
+    if ld_files:
+        try:
+            # Load LD matrix (handle gzip compression)
+            with gzip.open(ld_files[0], "rb") as f:
+                ld_matrix = np.loadtxt(f)
+
+            # Get the indices that are in the LD matrix
+            # These should be the sorted unique indices from the filtered data
+            all_indices_in_data = sorted(pdf["idx"].unique())
+
+            # The LD matrix dimensions tell us how many SNPs are included
+            n_snps_in_ld = ld_matrix.shape[0]
+
+            # The first n_snps_in_ld indices are in the LD matrix
+            if n_snps_in_ld <= len(all_indices_in_data):
+                snps_in_ld = set(all_indices_in_data[:n_snps_in_ld])
+        except Exception as e:
+            print(f"Could not load LD matrix: {e}")
+
+    # Mark SNPs that are in LD matrix
+    pdf["in_ld"] = pdf["idx"].isin(snps_in_ld)
+
     # Create figure
     fig, ax = plt.subplots(figsize=(10, 5))
 
@@ -212,6 +265,19 @@ def locuszoom_plot_interval(
         label=f"p < {pval_thresh:.0e}",
         zorder=2,
     )
+
+    # SNPs in LD matrix (hollow purple circles)
+    if snps_in_ld:
+        ax.scatter(
+            pdf.loc[pdf["in_ld"], "pos_b37"],
+            pdf.loc[pdf["in_ld"], "neglog10p"],
+            facecolors="none",
+            edgecolors="purple",
+            s=40,
+            linewidths=0.8,
+            label="In LD matrix",
+            zorder=2.5,
+        )
 
     # Lead SNP
     if mark_lead:
@@ -263,41 +329,43 @@ def locuszoom_plot_interval(
         )
 
         # Calculate r² with lead SNP if LD matrix is available
-        try:
-            ld_files = glob.glob(str(Path(ld_dir) / f"{gene}_*.bgz"))
-            if ld_files:
-                # Load LD matrix
-                ld = np.loadtxt(ld_files[0])
-
+        if ld_matrix is not None:
+            try:
                 # Get indices
                 lead_idx_ld = pdf[pdf["variant_id"] == lead_snp]["idx"].values[0]
                 sel_idx_ld = sel["idx"].values[0]
 
-                # Find positions in the LD matrix
-                # The LD matrix rows/cols correspond to the idx column in sorted order
-                all_indices = sorted(pdf["idx"].unique())
-                lead_pos = all_indices.index(lead_idx_ld)
-                sel_pos = all_indices.index(sel_idx_ld)
+                # Check if both SNPs are in the LD matrix
+                if lead_idx_ld in snps_in_ld and sel_idx_ld in snps_in_ld:
+                    # Find positions in the LD matrix
+                    all_indices = sorted(snps_in_ld)
+                    lead_pos = all_indices.index(lead_idx_ld)
+                    sel_pos = all_indices.index(sel_idx_ld)
 
-                # LD matrix might be symmetric, check dimensions
-                if lead_pos < ld.shape[0] and sel_pos < ld.shape[1]:
-                    r2 = ld[lead_pos, sel_pos] ** 2
+                    # Get r² from LD matrix
+                    if lead_pos < ld_matrix.shape[0] and sel_pos < ld_matrix.shape[1]:
+                        r2 = ld_matrix[lead_pos, sel_pos] ** 2
 
-                    # Add r² annotation
-                    ax.text(
-                        0.02,
-                        0.98,
-                        rf"$r^2$(lead, selected) = {r2:.3f}",
-                        transform=ax.transAxes,
-                        ha="left",
-                        va="top",
-                        fontsize=10,
-                        bbox=dict(
-                            boxstyle="round,pad=0.3", fc="white", ec="gray", alpha=0.8
-                        ),
-                    )
-        except Exception as e:
-            print(f"Could not calculate LD: {e}")
+                        # Add r² annotation
+                        ax.text(
+                            0.02,
+                            0.98,
+                            rf"$r^2$(lead, selected) = {r2:.3f}",
+                            transform=ax.transAxes,
+                            ha="left",
+                            va="top",
+                            fontsize=10,
+                            bbox=dict(
+                                boxstyle="round,pad=0.3",
+                                fc="white",
+                                ec="gray",
+                                alpha=0.8,
+                            ),
+                        )
+                else:
+                    print(f"Warning: Lead or selected SNP not in LD matrix")
+            except Exception as e:
+                print(f"Could not calculate LD: {e}")
 
     # Gene TSS (approximate)
     ax.axvline(
@@ -335,6 +403,12 @@ if __name__ == "__main__":
         "--gene", type=str, required=True, help="Gene symbol (e.g., COPZ1)"
     )
     parser.add_argument(
+        "--gene_id",
+        type=str,
+        required=True,
+        help="Ensembl gene ID (e.g., ENSG00000120645)",
+    )
+    parser.add_argument(
         "--selected_snp",
         type=str,
         required=True,
@@ -342,6 +416,12 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--out", type=str, required=True, help="Output path for locuszoom plot"
+    )
+    parser.add_argument(
+        "--snp_dir",
+        type=str,
+        default="/rds/project/rds-csoP2nj6Y6Y/biv22/perturb_exploratory/data/LD_loci",
+        help="Directory containing SNP files",
     )
     parser.add_argument(
         "--eqtl_dir",
@@ -376,8 +456,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--window_kb",
         type=int,
-        default=1000,
-        help="Window size around gene TSS in kb (default: 1000Kb)",
+        default=None,
+        help="Window size around gene TSS in kb (default: None, use all data)",
     )
     parser.add_argument(
         "--dpi", type=int, default=300, help="DPI for output figure (default: 300)"
@@ -386,12 +466,14 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Example usage:
-    # python plot_cis_eQTL_INTERVAL.py --gene COPZ1 --selected_snp rs11170507 --out locuszoom_COPZ1_INTERVAL.png
+    # python plot_cis_eQTL_INTERVAL.py --gene COPZ1 --gene_id ENSG00000120645 --selected_snp rs11170507 --out locuszoom_COPZ1_INTERVAL.png
 
     locuszoom_plot_interval(
         gene=args.gene,
+        gene_id=args.gene_id,
         selected_snp=args.selected_snp,
         out=args.out,
+        snp_dir=args.snp_dir,
         eqtl_dir=args.eqtl_dir,
         ld_dir=args.ld_dir,
         mark_lead=args.mark_lead,
